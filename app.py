@@ -12,6 +12,7 @@ import pandas as pd
 from bs4 import BeautifulSoup
 import requests
 from pptx import Presentation
+from datetime import datetime
 
 # ---------- SETUP ----------
 app = Flask(__name__)
@@ -156,7 +157,7 @@ temp_index = faiss.IndexFlatL2(1536)
 master_index = faiss.IndexFlatL2(1536)
 temp_chunks, master_chunks = [], []
 
-# new metadata trackers
+# Track file metadata
 master_files = []  # [{"name": ..., "timestamp": ..., "count": ...}, ...]
 temp_files = []
 
@@ -173,17 +174,35 @@ def upload():
         if not files:
             return jsonify({"error": "No files uploaded"}), 400
 
-        texts = [extract_text(f) for f in files]
-        chunks, vectors = make_embeddings(texts)
+        uploaded_files = []
 
-        if keep:
-            master_index.add(vectors)
-            master_chunks.extend(chunks)
-            return jsonify({"message": "📚 Added to long-term memory."})
-        else:
-            temp_index.add(vectors)
-            temp_chunks.extend(chunks)
-            return jsonify({"message": "🧠 Added to short-term memory."})
+        for f in files:
+            text = extract_text(f)
+            chunks, vectors = make_embeddings([text])
+            timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+            meta = {
+                "name": f.filename,
+                "timestamp": timestamp,
+                "count": len(chunks)
+            }
+
+            if keep:
+                master_index.add(vectors)
+                master_chunks.extend(chunks)
+                master_files.append(meta)
+            else:
+                temp_index.add(vectors)
+                temp_chunks.extend(chunks)
+                temp_files.append(meta)
+
+            uploaded_files.append(meta)
+
+        return jsonify({
+            "message": "📚 Added to long-term memory." if keep else "🧠 Added to short-term memory.",
+            "files": uploaded_files
+        })
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -215,27 +234,36 @@ def ask():
 
 @app.route("/reset", methods=["POST"])
 def reset_memory():
-    global temp_index, temp_chunks
+    global temp_index, temp_chunks, temp_files
     temp_index = faiss.IndexFlatL2(1536)
     temp_chunks = []
+    temp_files = []
     return jsonify({"message": "♻️ Short-term memory cleared."})
 
 @app.route("/reset_longterm", methods=["POST"])
 def reset_longterm():
-    global master_index, master_chunks
+    global master_index, master_chunks, master_files
     master_index = faiss.IndexFlatL2(1536)
     master_chunks = []
-    master_index_path = "vector_stores/master.index"
-    if os.path.exists(master_index_path):
-        os.remove(master_index_path)
+    master_files = []
     return jsonify({"message": "🧹 Long-term memory fully cleared."})
 
 @app.route("/list_longterm", methods=["GET"])
 def list_longterm():
-    if not master_chunks:
+    if not master_files:
         return jsonify({"files": [], "message": "No long-term files found."})
-    preview = [chunk[:120] + "..." if len(chunk) > 120 else chunk for chunk in master_chunks]
-    return jsonify({"count": len(master_chunks), "previews": preview[:30]})
+
+    result = []
+    for meta in master_files:
+        preview_text = next((chunk for chunk in master_chunks if chunk.strip()), "")[:150]
+        result.append({
+            "file": meta["name"],
+            "uploaded": meta["timestamp"],
+            "chunks": meta["count"],
+            "preview": preview_text + "..." if len(preview_text) > 120 else preview_text
+        })
+
+    return jsonify({"count": len(result), "files": result})
 
 # ---------- MAIN ----------
 if __name__ == "__main__":
