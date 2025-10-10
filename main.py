@@ -1,17 +1,15 @@
+import os, numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import os, numpy as np
 from openai import OpenAI
 import faiss
 from PyPDF2 import PdfReader
 import docx
 
-app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})  # ✅ allow all domains
-
 # ---------- SETUP ----------
 app = Flask(__name__)
-CORS(app)
+# ✅ Allow all domains (needed for Vercel frontend)
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
@@ -21,7 +19,7 @@ client = OpenAI(api_key=api_key)
 
 # ---------- UTILITIES ----------
 def extract_text(file):
-    name = file.filename
+    name = file.filename.lower()
     if name.endswith(".pdf"):
         reader = PdfReader(file)
         return "\n".join([page.extract_text() or "" for page in reader.pages])
@@ -30,8 +28,7 @@ def extract_text(file):
         return "\n".join([p.text for p in doc.paragraphs])
     elif name.endswith(".txt"):
         return file.read().decode("utf-8")
-    else:
-        return ""
+    return ""
 
 def make_embeddings(texts):
     chunks, chunk_size = [], 500
@@ -47,7 +44,7 @@ def ask_gpt(question, context):
     prompt = f"Answer using this information:\n{context}\n\nQuestion: {question}"
     chat = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role":"user","content":prompt}]
+        messages=[{"role": "user", "content": prompt}]
     )
     return chat.choices[0].message.content
 
@@ -59,39 +56,52 @@ temp_chunks, master_chunks = [], []
 # ---------- ROUTES ----------
 @app.route("/")
 def home():
-    return "✅ File Agent backend running successfully!"
+    return jsonify({"status": "ok", "message": "✅ File Agent backend running successfully!"})
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    keep = request.form.get("keep") == "true"
-    files = request.files.getlist("files")
-    texts = [extract_text(f) for f in files]
-    chunks, vectors = make_embeddings(texts)
-    if keep:
-        master_index.add(vectors)
-        master_chunks.extend(chunks)
-        return jsonify({"message": "📚 Added to long-term memory."})
-    else:
-        temp_index.add(vectors)
-        temp_chunks.extend(chunks)
-        return jsonify({"message": "🧠 Added to short-term memory."})
+    try:
+        keep = request.form.get("keep") == "true"
+        files = request.files.getlist("files")
+        if not files:
+            return jsonify({"error": "No files uploaded"}), 400
+        texts = [extract_text(f) for f in files]
+        chunks, vectors = make_embeddings(texts)
+        if keep:
+            master_index.add(vectors)
+            master_chunks.extend(chunks)
+            return jsonify({"message": "📚 Added to long-term memory."})
+        else:
+            temp_index.add(vectors)
+            temp_chunks.extend(chunks)
+            return jsonify({"message": "🧠 Added to short-term memory."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/ask", methods=["POST"])
 def ask():
-    question = request.json.get("question")
-    q_vec = client.embeddings.create(model="text-embedding-3-small", input=question).data[0].embedding
-    q_vec = np.array([q_vec]).astype("float32")
+    try:
+        data = request.get_json(force=True)
+        question = data.get("question", "")
+        if not question:
+            return jsonify({"error": "Missing question"}), 400
 
-    def top_context(index, chunks):
-        if index.ntotal == 0: return []
-        D, I = index.search(q_vec, k=min(3, index.ntotal))
-        return [chunks[i] for i in I[0] if i < len(chunks)]
+        q_vec = client.embeddings.create(model="text-embedding-3-small", input=question).data[0].embedding
+        q_vec = np.array([q_vec]).astype("float32")
 
-    ctx = "\n".join(top_context(temp_index, temp_chunks) + top_context(master_index, master_chunks))
-    if not ctx.strip():
-        return jsonify({"answer": "No relevant context found. Try uploading files first."})
-    answer = ask_gpt(question, ctx)
-    return jsonify({"answer": answer})
+        def top_context(index, chunks):
+            if index.ntotal == 0:
+                return []
+            D, I = index.search(q_vec, k=min(3, index.ntotal))
+            return [chunks[i] for i in I[0] if i < len(chunks)]
+
+        ctx = "\n".join(top_context(temp_index, temp_chunks) + top_context(master_index, master_chunks))
+        if not ctx.strip():
+            return jsonify({"answer": "No relevant context found. Try uploading files first."})
+        answer = ask_gpt(question, ctx)
+        return jsonify({"answer": answer})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/reset", methods=["POST"])
 def reset_memory():
