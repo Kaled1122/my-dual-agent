@@ -5,24 +5,13 @@
   <title> Dual-Memory File Agent</title>
   <style>
     /* ---- Base ---- */
-    * {
-      box-sizing: border-box;
-      transition: all 0.3s ease;
-    }
+    * { box-sizing: border-box; transition: all 0.3s ease; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background: linear-gradient(180deg, #f6f7f9 0%, #e9ebee 100%);
       margin: 0;
       padding: 60px 20px;
       color: #1d1d1f;
-    }
-    h1 {
-      font-size: 28px;
-      font-weight: 600;
-      text-align: center;
-      margin-bottom: 30px;
-      color: #111;
-      letter-spacing: -0.3px;
     }
 
     /* ---- Card ---- */
@@ -37,14 +26,22 @@
       box-shadow: 0 8px 40px rgba(0,0,0,0.08);
     }
 
-    /* ---- Inputs & Buttons ---- */
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      text-align: center;
+      margin-bottom: 30px;
+      color: #111;
+      letter-spacing: -0.3px;
+    }
+
     label {
       display: block;
       font-weight: 500;
       margin-top: 20px;
     }
-    input[type="file"],
-    textarea {
+
+    input[type="file"], textarea {
       width: 100%;
       margin-top: 8px;
       padding: 12px 14px;
@@ -53,10 +50,9 @@
       border-radius: 14px;
       background: #fafafa;
     }
-    textarea {
-      resize: none;
-      height: 90px;
-    }
+
+    textarea { resize: none; height: 90px; }
+
     input[type="checkbox"] {
       transform: scale(1.2);
       margin-right: 6px;
@@ -76,20 +72,15 @@
       color: #fff;
       letter-spacing: 0.3px;
     }
-    button:hover {
-      background: #1d1d1f;
-      transform: translateY(-1px);
-    }
-    button:active {
-      transform: scale(0.99);
-    }
+    button:hover { background: #1d1d1f; transform: translateY(-1px); }
+    button:active { transform: scale(0.99); }
 
-    /* ---- Sections ---- */
     hr {
       border: none;
       border-top: 1px solid #e2e2e7;
       margin: 30px 0;
     }
+
     .answer, .list {
       background: #f8f8f8;
       border-radius: 16px;
@@ -98,21 +89,50 @@
       min-height: 40px;
       font-size: 15px;
       line-height: 1.5;
-    }
-    .list ul {
-      padding-left: 20px;
-      margin: 0;
-    }
-    p.status {
-      color: #666;
-      margin-top: 8px;
-      font-size: 14px;
+      white-space: pre-wrap;
     }
 
-    /* ---- Animations ---- */
-    .fade {
-      animation: fadeIn 0.5s ease;
+    p.status { color: #666; margin-top: 8px; font-size: 14px; }
+
+    /* ---- Supported Note ---- */
+    .note {
+      font-size: 13px;
+      color: #555;
+      text-align: center;
+      margin-top: 6px;
+      opacity: 0.8;
     }
+
+    /* ---- Loader ---- */
+    .loader-overlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(255,255,255,0.65);
+      backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      visibility: hidden;
+      opacity: 0;
+      transition: opacity 0.3s ease, visibility 0.3s ease;
+    }
+    .loader-overlay.active { visibility: visible; opacity: 1; }
+    .spinner {
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      border: 4px solid #d1d1d6;
+      border-top-color: #007aff;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .fade { animation: fadeIn 0.5s ease; }
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(6px); }
       to { opacity: 1; transform: translateY(0); }
@@ -121,12 +141,15 @@
 </head>
 <body>
   <div class="card fade">
-    <h1>🧠 Dual-Memory File Agent</h1>
+    <h1> Dual-Memory File Agent</h1>
 
     <!-- Upload -->
     <label>Upload Files</label>
     <input type="file" id="fileInput" multiple />
     <label><input type="checkbox" id="keep"> Keep permanently (Long-Term Memory)</label>
+    <div class="note">
+      Supported: PDF, DOCX, TXT, Images (JPG/PNG), Excel (XLS/XLSX/CSV), HTML, PowerPoint (PPTX), Audio (MP3/WAV), Video (MP4/MOV)
+    </div>
     <button onclick="uploadFiles()">Upload</button>
     <p id="status" class="status"></p>
 
@@ -152,8 +175,19 @@
     <p id="resetStatus" class="status"></p>
   </div>
 
+  <!-- Loader -->
+  <div id="loader" class="loader-overlay">
+    <div class="spinner"></div>
+  </div>
+
   <script>
     const API_URL = "https://my-dual-agent.onrender.com";
+
+    function showLoader(show = true) {
+      const loader = document.getElementById("loader");
+      if (show) loader.classList.add("active");
+      else loader.classList.remove("active");
+    }
 
     async function uploadFiles() {
       const files = document.getElementById("fileInput").files;
@@ -164,6 +198,7 @@
       for (let f of files) formData.append("files", f);
       formData.append("keep", keep);
 
+      showLoader(true);
       try {
         const res = await fetch(`${API_URL}/upload`, { method: "POST", body: formData });
         const data = await res.json();
@@ -171,6 +206,8 @@
           data.message || data.error || "✅ Upload complete.";
       } catch (err) {
         document.getElementById("status").innerText = "❌ Upload failed: " + err.message;
+      } finally {
+        showLoader(false);
       }
     }
 
@@ -178,6 +215,7 @@
       const q = document.getElementById("question").value.trim();
       if (!q) return alert("Please enter a question first.");
 
+      showLoader(true);
       try {
         const res = await fetch(`${API_URL}/ask`, {
           method: "POST",
@@ -189,10 +227,13 @@
           data.answer || data.error || "❌ No answer received.";
       } catch (err) {
         document.getElementById("answer").innerText = "❌ Error: " + err.message;
+      } finally {
+        showLoader(false);
       }
     }
 
     async function resetMemory() {
+      showLoader(true);
       try {
         const res = await fetch(`${API_URL}/reset`, { method: "POST" });
         const data = await res.json();
@@ -200,10 +241,13 @@
           data.message || data.error || "♻️ Reset complete.";
       } catch (err) {
         document.getElementById("resetStatus").innerText = "❌ Error: " + err.message;
+      } finally {
+        showLoader(false);
       }
     }
 
     async function listLongTerm() {
+      showLoader(true);
       try {
         const res = await fetch(`${API_URL}/list_longterm`);
         const data = await res.json();
@@ -216,11 +260,14 @@
         }
       } catch (err) {
         document.getElementById("longTermList").innerText = "❌ Error: " + err.message;
+      } finally {
+        showLoader(false);
       }
     }
 
     async function resetLongTerm() {
       if (!confirm("Erase all long-term memory? This cannot be undone.")) return;
+      showLoader(true);
       try {
         const res = await fetch(`${API_URL}/reset_longterm`, { method: "POST" });
         const data = await res.json();
@@ -229,6 +276,8 @@
         document.getElementById("longTermList").innerText = "";
       } catch (err) {
         document.getElementById("resetLongTermStatus").innerText = "❌ Error: " + err.message;
+      } finally {
+        showLoader(false);
       }
     }
   </script>
