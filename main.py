@@ -8,7 +8,6 @@ import docx
 
 # ---------- SETUP ----------
 app = Flask(__name__)
-# ✅ Allow all domains (needed for Vercel frontend)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 api_key = os.getenv("OPENAI_API_KEY")
@@ -31,12 +30,28 @@ def extract_text(file):
     return ""
 
 def make_embeddings(texts):
+    # Clean and chunk text
     chunks, chunk_size = [], 500
     for t in texts:
+        if not isinstance(t, str):
+            continue
+        t = t.strip()
+        if not t:
+            continue
         words = t.split()
         for i in range(0, len(words), chunk_size):
-            chunks.append(" ".join(words[i:i+chunk_size]))
-    embeds = client.embeddings.create(model="text-embedding-3-small", input=chunks)
+            chunk = " ".join(words[i:i + chunk_size]).strip()
+            if chunk:
+                chunks.append(chunk)
+
+    if not chunks:
+        raise ValueError("No valid text found to embed.")
+
+    # ✅ Always send a list of strings
+    embeds = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=chunks
+    )
     vectors = [d.embedding for d in embeds.data]
     return chunks, np.array(vectors).astype("float32")
 
@@ -65,8 +80,10 @@ def upload():
         files = request.files.getlist("files")
         if not files:
             return jsonify({"error": "No files uploaded"}), 400
+
         texts = [extract_text(f) for f in files]
         chunks, vectors = make_embeddings(texts)
+
         if keep:
             master_index.add(vectors)
             master_chunks.extend(chunks)
@@ -82,12 +99,16 @@ def upload():
 def ask():
     try:
         data = request.get_json(force=True)
-        question = data.get("question", "")
+        question = data.get("question", "").strip()
         if not question:
             return jsonify({"error": "Missing question"}), 400
 
-        q_vec = client.embeddings.create(model="text-embedding-3-small", input=question).data[0].embedding
-        q_vec = np.array([q_vec]).astype("float32")
+        # ✅ Always wrap in list
+        embed_resp = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=[question]
+        )
+        q_vec = np.array([embed_resp.data[0].embedding]).astype("float32")
 
         def top_context(index, chunks):
             if index.ntotal == 0:
@@ -98,6 +119,7 @@ def ask():
         ctx = "\n".join(top_context(temp_index, temp_chunks) + top_context(master_index, master_chunks))
         if not ctx.strip():
             return jsonify({"answer": "No relevant context found. Try uploading files first."})
+
         answer = ask_gpt(question, ctx)
         return jsonify({"answer": answer})
     except Exception as e:
