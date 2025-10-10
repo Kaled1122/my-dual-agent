@@ -152,10 +152,13 @@ Question: {question}
     return chat.choices[0].message.content.strip()
 
 # ---------- MEMORY ----------
-os.makedirs("vector_stores", exist_ok=True)
 temp_index = faiss.IndexFlatL2(1536)
 master_index = faiss.IndexFlatL2(1536)
 temp_chunks, master_chunks = [], []
+
+# new metadata trackers
+master_files = []  # [{"name": ..., "timestamp": ..., "count": ...}, ...]
+temp_files = []
 
 # ---------- ROUTES ----------
 @app.route("/")
