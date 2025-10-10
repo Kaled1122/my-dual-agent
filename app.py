@@ -177,6 +177,11 @@ temp_index = faiss.IndexFlatL2(1536)
 master_index = faiss.IndexFlatL2(1536)
 temp_chunks, master_chunks = [], []
 
+os.makedirs("vector_stores", exist_ok=True)
+temp_index = faiss.IndexFlatL2(1536)
+master_index = faiss.IndexFlatL2(1536)
+
+
 # ---------- ROUTES ----------
 @app.route("/")
 def home():
