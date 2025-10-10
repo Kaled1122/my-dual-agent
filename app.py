@@ -1,4 +1,4 @@
-import os, numpy as np
+import os, numpy as np, traceback
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from openai import OpenAI
@@ -8,21 +8,37 @@ import docx
 from pdf2image import convert_from_bytes
 import pytesseract
 from PIL import Image
-from io import BytesIO
 import pandas as pd
 from bs4 import BeautifulSoup
 import requests
 from pptx import Presentation
 from moviepy.editor import VideoFileClip
 
+# ---------- STARTUP DIAGNOSTICS ----------
+print("🚀 Booting Flask app...")
+
+try:
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("❌ Missing OPENAI_API_KEY environment variable")
+
+    # quick system checks
+    print("🧩 Checking system tools:")
+    os.system("which ffmpeg || echo '⚠️ ffmpeg missing'")
+    os.system("which tesseract || echo '⚠️ tesseract missing'")
+
+    # vector folder setup
+    os.makedirs("vector_stores", exist_ok=True)
+    print("📂 vector_stores directory ready")
+
+except Exception as e:
+    print("❌ Early-init error:")
+    traceback.print_exc()
+
 # ---------- SETUP ----------
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    raise ValueError("❌ Missing OPENAI_API_KEY. Set it in Render Environment Variables.")
-
 client = OpenAI(api_key=api_key)
 
 # ---------- UTILITIES ----------
@@ -30,7 +46,6 @@ def extract_text(file):
     """Extract readable text or transcriptions from all supported file types."""
     name = file.filename.lower()
 
-    # ---- PDF ----
     if name.endswith(".pdf"):
         try:
             reader = PdfReader(file)
@@ -43,12 +58,10 @@ def extract_text(file):
             text = "\n".join([pytesseract.image_to_string(img) for img in images])
         return text
 
-    # ---- Word ----
     elif name.endswith(".docx"):
         doc = docx.Document(file)
         return "\n".join([p.text for p in doc.paragraphs])
 
-    # ---- Text / URL ----
     elif name.endswith(".txt"):
         text = file.read().decode("utf-8").strip()
         if text.startswith("http://") or text.startswith("https://"):
@@ -60,24 +73,17 @@ def extract_text(file):
                 return f"[Error loading web page: {e}]"
         return text
 
-    # ---- Images ----
     elif name.endswith((".jpg", ".jpeg", ".png")):
         img = Image.open(file)
         return pytesseract.image_to_string(img)
 
-    # ---- Excel / CSV ----
     elif name.endswith((".xlsx", ".xls", ".csv")):
         try:
-            if name.endswith(".csv"):
-                df = pd.read_csv(file)
-            else:
-                df = pd.read_excel(file)
-            text = "\n".join(df.astype(str).fillna("").values.flatten())
-            return text
+            df = pd.read_csv(file) if name.endswith(".csv") else pd.read_excel(file)
+            return "\n".join(df.astype(str).fillna("").values.flatten())
         except Exception as e:
             return f"[Error reading Excel/CSV: {e}]"
 
-    # ---- HTML ----
     elif name.endswith((".html", ".htm")):
         try:
             soup = BeautifulSoup(file.read(), "html.parser")
@@ -85,7 +91,6 @@ def extract_text(file):
         except Exception as e:
             return f"[Error reading HTML: {e}]"
 
-    # ---- PowerPoint ----
     elif name.endswith(".pptx"):
         try:
             prs = Presentation(file)
@@ -98,7 +103,6 @@ def extract_text(file):
         except Exception as e:
             return f"[Error reading PPTX: {e}]"
 
-    # ---- Audio ----
     elif name.endswith((".mp3", ".wav", ".m4a")):
         file.seek(0)
         temp_path = "temp_audio.mp3"
@@ -112,7 +116,6 @@ def extract_text(file):
         os.remove(temp_path)
         return transcript.text
 
-    # ---- Video ----
     elif name.endswith((".mp4", ".mov", ".mkv")):
         file.seek(0)
         video_path = "temp_video.mp4"
@@ -173,19 +176,23 @@ Question: {question}
     return chat.choices[0].message.content.strip()
 
 # ---------- MEMORY ----------
-temp_index = faiss.IndexFlatL2(1536)
-master_index = faiss.IndexFlatL2(1536)
-temp_chunks, master_chunks = [], []
-
-os.makedirs("vector_stores", exist_ok=True)
-temp_index = faiss.IndexFlatL2(1536)
-master_index = faiss.IndexFlatL2(1536)
-
+try:
+    temp_index = faiss.IndexFlatL2(1536)
+    master_index = faiss.IndexFlatL2(1536)
+    temp_chunks, master_chunks = [], []
+    print("✅ FAISS memory initialized")
+except Exception:
+    print("❌ FAISS init failed:")
+    traceback.print_exc()
 
 # ---------- ROUTES ----------
 @app.route("/")
 def home():
     return jsonify({"status": "ok", "message": "✅ File Agent backend running successfully!"})
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok", "message": "healthy"}), 200
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -207,6 +214,7 @@ def upload():
             temp_chunks.extend(chunks)
             return jsonify({"message": "🧠 Added to short-term memory."})
     except Exception as e:
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route("/ask", methods=["POST"])
@@ -233,6 +241,7 @@ def ask():
         answer = ask_gpt(question, ctx)
         return jsonify({"answer": answer})
     except Exception as e:
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route("/reset", methods=["POST"])
@@ -261,4 +270,5 @@ def list_longterm():
 
 # ---------- MAIN ----------
 if __name__ == "__main__":
+    print("✅ Flask app initialized successfully! Listening on port 5000")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
