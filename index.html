@@ -2,68 +2,163 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>🧠 Dual-Memory File Agent</title>
+  <title> Dual-Memory File Agent</title>
   <style>
+    /* ---- Base ---- */
+    * {
+      box-sizing: border-box;
+      transition: all 0.3s ease;
+    }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: #f5f5f7;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: linear-gradient(180deg, #f6f7f9 0%, #e9ebee 100%);
       margin: 0;
-      padding: 40px;
+      padding: 60px 20px;
       color: #1d1d1f;
     }
-    .container {
-      max-width: 700px;
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      text-align: center;
+      margin-bottom: 30px;
+      color: #111;
+      letter-spacing: -0.3px;
+    }
+
+    /* ---- Card ---- */
+    .card {
+      max-width: 760px;
       margin: auto;
-      background: #fff;
-      padding: 30px;
+      background: rgba(255,255,255,0.7);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border-radius: 28px;
+      padding: 40px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.08);
+    }
+
+    /* ---- Inputs & Buttons ---- */
+    label {
+      display: block;
+      font-weight: 500;
+      margin-top: 20px;
+    }
+    input[type="file"],
+    textarea {
+      width: 100%;
+      margin-top: 8px;
+      padding: 12px 14px;
+      font-size: 15px;
+      border: 1px solid #d1d1d6;
+      border-radius: 14px;
+      background: #fafafa;
+    }
+    textarea {
+      resize: none;
+      height: 90px;
+    }
+    input[type="checkbox"] {
+      transform: scale(1.2);
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 16px;
+      padding: 13px 0;
+      font-size: 16px;
+      border: none;
+      border-radius: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      background: #000;
+      color: #fff;
+      letter-spacing: 0.3px;
+    }
+    button:hover {
+      background: #1d1d1f;
+      transform: translateY(-1px);
+    }
+    button:active {
+      transform: scale(0.99);
+    }
+
+    /* ---- Sections ---- */
+    hr {
+      border: none;
+      border-top: 1px solid #e2e2e7;
+      margin: 30px 0;
+    }
+    .answer, .list {
+      background: #f8f8f8;
       border-radius: 16px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      padding: 16px;
+      margin-top: 14px;
+      min-height: 40px;
+      font-size: 15px;
+      line-height: 1.5;
     }
-    h1 { text-align: center; font-size: 26px; margin-bottom: 20px; }
-    input, button, textarea {
-      width: 100%; margin-top: 10px; padding: 10px;
-      border-radius: 10px; border: 1px solid #ccc; font-size: 15px;
+    .list ul {
+      padding-left: 20px;
+      margin: 0;
     }
-    button { background: black; color: white; cursor: pointer; }
-    button:hover { opacity: 0.8; }
-    .answer {
-      background: #f0f0f0;
-      padding: 15px;
-      border-radius: 12px;
-      margin-top: 10px;
-      white-space: pre-wrap;
+    p.status {
+      color: #666;
+      margin-top: 8px;
+      font-size: 14px;
+    }
+
+    /* ---- Animations ---- */
+    .fade {
+      animation: fadeIn 0.5s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
     }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div class="card fade">
     <h1>🧠 Dual-Memory File Agent</h1>
 
-    <label>Upload Files:</label>
+    <!-- Upload -->
+    <label>Upload Files</label>
     <input type="file" id="fileInput" multiple />
-    <label><input type="checkbox" id="keep"> Keep permanently?</label>
+    <label><input type="checkbox" id="keep"> Keep permanently (Long-Term Memory)</label>
     <button onclick="uploadFiles()">Upload</button>
-    <p id="status"></p>
+    <p id="status" class="status"></p>
 
     <hr>
 
-    <textarea id="question" rows="3" placeholder="Ask a question..."></textarea>
+    <!-- Ask -->
+    <label>Ask a Question</label>
+    <textarea id="question" placeholder="Type your question here..."></textarea>
     <button onclick="askQuestion()">Ask</button>
     <div id="answer" class="answer"></div>
 
     <hr>
-    <button onclick="resetMemory()">♻️ Reset Short-Term Memory</button>
-    <p id="resetStatus"></p>
+
+    <!-- Memory Controls -->
+    <h3>Memory Controls</h3>
+    <button style="background:#007aff" onclick="listLongTerm()">📄 View Long-Term Memory</button>
+    <div id="longTermList" class="list"></div>
+
+    <button style="background:#ff3b30" onclick="resetLongTerm()">🧹 Reset Long-Term Memory</button>
+    <p id="resetLongTermStatus" class="status"></p>
+
+    <button style="background:#34c759" onclick="resetMemory()">♻️ Reset Short-Term Memory</button>
+    <p id="resetStatus" class="status"></p>
   </div>
 
   <script>
-    // 🔗 Change this to your actual Render backend (no trailing slash)
     const API_URL = "https://my-dual-agent.onrender.com";
 
     async function uploadFiles() {
       const files = document.getElementById("fileInput").files;
       const keep = document.getElementById("keep").checked;
-      if (!files.length) return alert("No files selected!");
+      if (!files.length) return alert("No files selected.");
 
       const formData = new FormData();
       for (let f of files) formData.append("files", f);
@@ -105,6 +200,35 @@
           data.message || data.error || "♻️ Reset complete.";
       } catch (err) {
         document.getElementById("resetStatus").innerText = "❌ Error: " + err.message;
+      }
+    }
+
+    async function listLongTerm() {
+      try {
+        const res = await fetch(`${API_URL}/list_longterm`);
+        const data = await res.json();
+        const box = document.getElementById("longTermList");
+        if (data.previews && data.previews.length) {
+          const listHTML = data.previews.map((p, i) => `<li>${i + 1}. ${p}</li>`).join("");
+          box.innerHTML = `<ul>${listHTML}</ul>`;
+        } else {
+          box.innerText = data.message || "No long-term memory found.";
+        }
+      } catch (err) {
+        document.getElementById("longTermList").innerText = "❌ Error: " + err.message;
+      }
+    }
+
+    async function resetLongTerm() {
+      if (!confirm("Erase all long-term memory? This cannot be undone.")) return;
+      try {
+        const res = await fetch(`${API_URL}/reset_longterm`, { method: "POST" });
+        const data = await res.json();
+        document.getElementById("resetLongTermStatus").innerText =
+          data.message || data.error || "🧹 Long-term memory cleared.";
+        document.getElementById("longTermList").innerText = "";
+      } catch (err) {
+        document.getElementById("resetLongTermStatus").innerText = "❌ Error: " + err.message;
       }
     }
   </script>
