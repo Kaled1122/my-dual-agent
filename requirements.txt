@@ -1,5 +1,3 @@
-setuptools
-wheel
 flask
 flask-cors
 openai
@@ -14,6 +12,4 @@ pdf2image
 pytesseract
 requests
 beautifulsoup4
-moviepy
-imageio[ffmpeg]
 gunicorn
