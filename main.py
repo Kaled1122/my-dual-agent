@@ -141,12 +141,37 @@ def ask():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/reset", methods=["POST"])
 def reset_memory():
     global temp_index, temp_chunks
     temp_index = faiss.IndexFlatL2(1536)
     temp_chunks = []
     return jsonify({"message": "♻️ Short-term memory cleared."})
+
+
+# ---------- NEW FEATURES ----------
+
+@app.route("/reset_longterm", methods=["POST"])
+def reset_longterm():
+    """Completely clear long-term memory."""
+    global master_index, master_chunks
+    master_index = faiss.IndexFlatL2(1536)
+    master_chunks = []
+    master_index_path = "vector_stores/master.index"
+    if os.path.exists(master_index_path):
+        os.remove(master_index_path)
+    return jsonify({"message": "🧹 Long-term memory fully cleared."})
+
+
+@app.route("/list_longterm", methods=["GET"])
+def list_longterm():
+    """Preview stored long-term memory contents."""
+    if not master_chunks:
+        return jsonify({"files": [], "message": "No long-term files found."})
+    preview = [chunk[:120] + "..." if len(chunk) > 120 else chunk for chunk in master_chunks]
+    return jsonify({"count": len(master_chunks), "previews": preview[:30]})
+
 
 # ---------- MAIN ----------
 if __name__ == "__main__":
