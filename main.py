@@ -4,7 +4,7 @@ import faiss
 from PyPDF2 import PdfReader
 import docx
 
-client = OpenAI(api_key=os.getenv("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"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ----------  UTILITIES  ----------
 
