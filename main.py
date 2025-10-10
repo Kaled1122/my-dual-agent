@@ -1,28 +1,36 @@
 import os, numpy as np
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 from openai import OpenAI
 import faiss
 from PyPDF2 import PdfReader
 import docx
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# ---------- SETUP ----------
+app = Flask(__name__)
+CORS(app)
 
-# ----------  UTILITIES  ----------
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise ValueError("❌ Missing OPENAI_API_KEY. Set it in Render Environment Variables.")
 
-def extract_text(filepath):
-    if filepath.endswith(".pdf"):
-        reader = PdfReader(filepath)
+client = OpenAI(api_key=api_key)
+
+# ---------- UTILITIES ----------
+def extract_text(file):
+    name = file.filename
+    if name.endswith(".pdf"):
+        reader = PdfReader(file)
         return "\n".join([page.extract_text() or "" for page in reader.pages])
-    elif filepath.endswith(".docx"):
-        doc = docx.Document(filepath)
+    elif name.endswith(".docx"):
+        doc = docx.Document(file)
         return "\n".join([p.text for p in doc.paragraphs])
-    elif filepath.endswith(".txt"):
-        with open(filepath, "r", encoding="utf-8") as f:
-            return f.read()
+    elif name.endswith(".txt"):
+        return file.read().decode("utf-8")
     else:
         return ""
 
 def make_embeddings(texts):
-    # Breaks large texts into chunks of ~500 words
     chunks, chunk_size = [], 500
     for t in texts:
         words = t.split()
@@ -33,56 +41,41 @@ def make_embeddings(texts):
     return chunks, np.array(vectors).astype("float32")
 
 def ask_gpt(question, context):
-    prompt = f"Answer using the information below:\n{context}\n\nQuestion: {question}"
+    prompt = f"Answer using this information:\n{context}\n\nQuestion: {question}"
     chat = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role":"user","content":prompt}]
     )
     return chat.choices[0].message.content
 
-# ----------  MEMORY SETUP  ----------
-
-temp_index_path = "vector_stores/temp.index"
-master_index_path = "vector_stores/master.index"
-
-def load_index(path):
-    return faiss.read_index(path) if os.path.exists(path) else faiss.IndexFlatL2(1536)
-
-temp_index = load_index(temp_index_path)
-master_index = load_index(master_index_path)
+# ---------- MEMORY ----------
+temp_index = faiss.IndexFlatL2(1536)
+master_index = faiss.IndexFlatL2(1536)
 temp_chunks, master_chunks = [], []
 
-# ----------  CORE FUNCTIONS  ----------
+# ---------- ROUTES ----------
+@app.route("/")
+def home():
+    return "✅ File Agent backend running successfully!"
 
-def upload(folder, keep=False):
-    global temp_index, master_index, temp_chunks, master_chunks
-    texts = []
-    for file in os.listdir(folder):
-        path = os.path.join(folder, file)
-        texts.append(extract_text(path))
-        print(f"✅ Loaded {file}")
+@app.route("/upload", methods=["POST"])
+def upload():
+    keep = request.form.get("keep") == "true"
+    files = request.files.getlist("files")
+    texts = [extract_text(f) for f in files]
     chunks, vectors = make_embeddings(texts)
     if keep:
         master_index.add(vectors)
         master_chunks.extend(chunks)
-        faiss.write_index(master_index, master_index_path)
-        print("📚 Added to long-term memory.")
+        return jsonify({"message": "📚 Added to long-term memory."})
     else:
         temp_index.add(vectors)
         temp_chunks.extend(chunks)
-        faiss.write_index(temp_index, temp_index_path)
-        print("🧠 Added to short-term memory.")
+        return jsonify({"message": "🧠 Added to short-term memory."})
 
-def reset_temp():
-    global temp_index, temp_chunks
-    temp_index = faiss.IndexFlatL2(1536)
-    temp_chunks = []
-    if os.path.exists(temp_index_path):
-        os.remove(temp_index_path)
-    print("♻️  Short-term memory cleared.")
-
-def query(question):
-    global temp_index, master_index, temp_chunks, master_chunks
+@app.route("/ask", methods=["POST"])
+def ask():
+    question = request.json.get("question")
     q_vec = client.embeddings.create(model="text-embedding-3-small", input=question).data[0].embedding
     q_vec = np.array([q_vec]).astype("float32")
 
@@ -92,36 +85,18 @@ def query(question):
         return [chunks[i] for i in I[0] if i < len(chunks)]
 
     ctx = "\n".join(top_context(temp_index, temp_chunks) + top_context(master_index, master_chunks))
+    if not ctx.strip():
+        return jsonify({"answer": "No relevant context found. Try uploading files first."})
     answer = ask_gpt(question, ctx)
-    print("\n💬 Answer:\n", answer, "\n")
+    return jsonify({"answer": answer})
 
-# ----------  SIMPLE COMMAND LOOP  ----------
+@app.route("/reset", methods=["POST"])
+def reset_memory():
+    global temp_index, temp_chunks
+    temp_index = faiss.IndexFlatL2(1536)
+    temp_chunks = []
+    return jsonify({"message": "♻️ Short-term memory cleared."})
 
-def menu():
-    print("""
-======== FILE AGENT ========
-1. Upload current batch (short-term)
-2. Upload and keep permanently (long-term)
-3. Ask a question
-4. Reset short-term memory
-5. Exit
-============================
-""")
-
-while True:
-    menu()
-    choice = input("Select option: ").strip()
-    if choice == "1":
-        upload("uploads", keep=False)
-    elif choice == "2":
-        upload("uploads", keep=True)
-    elif choice == "3":
-        q = input("Ask: ")
-        query(q)
-    elif choice == "4":
-        reset_temp()
-    elif choice == "5":
-        print("Goodbye 👋")
-        break
-    else:
-        print("Invalid option.")
+# ---------- MAIN ----------
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
