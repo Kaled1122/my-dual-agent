@@ -1,10 +1,13 @@
-import os, numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import os, numpy as np
 from openai import OpenAI
 import faiss
 from PyPDF2 import PdfReader
 import docx
+
+app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})  # ✅ allow all domains
 
 # ---------- SETUP ----------
 app = Flask(__name__)
