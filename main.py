@@ -56,12 +56,28 @@ def make_embeddings(texts):
     return chunks, np.array(vectors).astype("float32")
 
 def ask_gpt(question, context):
-    prompt = f"Answer using this information:\n{context}\n\nQuestion: {question}"
+    # If there’s no context at all, skip the API call
+    if not context.strip():
+        return "⚠️ No relevant information found in memory. Please upload documents first."
+
+    prompt = f"""
+You are a precise assistant that answers **only** using the information inside <context> tags.
+If the answer cannot be found in the context, reply exactly:
+"I couldn’t find that information in the uploaded files."
+
+<context>
+{context}
+</context>
+
+Question: {question}
+"""
+
     chat = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-5",
         messages=[{"role": "user", "content": prompt}]
     )
-    return chat.choices[0].message.content
+    return chat.choices[0].message.content.strip()
+
 
 # ---------- MEMORY ----------
 temp_index = faiss.IndexFlatL2(1536)
