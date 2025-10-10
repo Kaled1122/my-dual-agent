@@ -1,7 +1,25 @@
+# --- Core Web & Server ---
 flask
 flask-cors
+gunicorn
 openai
 faiss-cpu
+
+# --- Document Formats ---
 PyPDF2
 python-docx
-gunicorn
+pandas
+openpyxl
+python-pptx
+
+# --- OCR / Image / PDF ---
+pillow
+pdf2image
+pytesseract
+
+# --- Web / HTML Pages ---
+requests
+beautifulsoup4
+
+# --- Media (Audio & Video) ---
+moviepy
