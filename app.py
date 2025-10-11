@@ -8,7 +8,7 @@ from docx import Document
 import pandas as pd
 from pptx import Presentation
 from bs4 import BeautifulSoup
-import requests  # 🌐 URL fetching
+import requests
 
 # -------------------------------------------------------------------
 # ✅ APP SETUP
@@ -42,7 +42,6 @@ def extract_text(file):
     """Extract readable text from multiple document formats."""
     name = file.filename.lower()
 
-    # PDF
     if name.endswith(".pdf"):
         try:
             reader = PdfReader(file)
@@ -50,12 +49,10 @@ def extract_text(file):
         except Exception:
             return ""
 
-    # DOCX
     elif name.endswith(".docx"):
         doc = Document(file)
         return "\n".join([p.text for p in doc.paragraphs])
 
-    # EXCEL / CSV
     elif name.endswith((".xls", ".xlsx", ".csv")):
         try:
             df = pd.read_excel(file) if not name.endswith(".csv") else pd.read_csv(file)
@@ -63,7 +60,6 @@ def extract_text(file):
         except Exception:
             return ""
 
-    # POWERPOINT
     elif name.endswith(".pptx"):
         try:
             prs = Presentation(file)
@@ -76,7 +72,6 @@ def extract_text(file):
         except Exception:
             return ""
 
-    # HTML
     elif name.endswith((".html", ".htm")):
         try:
             soup = BeautifulSoup(file.read(), "html.parser")
@@ -84,7 +79,6 @@ def extract_text(file):
         except Exception:
             return ""
 
-    # Plain text / others
     else:
         try:
             return file.read().decode("utf-8", errors="ignore")
@@ -120,7 +114,6 @@ def upload_files():
         if not text.strip():
             continue
 
-        # Split long documents into manageable chunks
         for chunk in chunk_text(text):
             emb = embed_text(chunk)
             memory_vectors.append(emb)
@@ -130,9 +123,6 @@ def upload_files():
     return jsonify({"message": f"✅ Uploaded {count} file(s) to short-term memory."})
 
 
-# -------------------------------------------------------------------
-# 🌐 NEW: Fetch and embed webpage content
-# -------------------------------------------------------------------
 @app.route("/url", methods=["POST"])
 def upload_url():
     """Fetch and embed a webpage directly from a URL."""
@@ -161,46 +151,38 @@ def upload_url():
     return jsonify({"message": f"✅ Page from {url} added to short-term memory."})
 
 
-# -------------------------------------------------------------------
-# 🤖 ASK ENDPOINT WITH ANSWER LENGTH MODES
-# -------------------------------------------------------------------
 @app.route("/ask", methods=["POST"])
 def ask_question():
-    """Answer based on context with variable length modes."""
+    """Answer using GPT-5 with variable response length."""
     global memory_vectors, memory_texts
     data = request.get_json()
     question = data.get("question", "").strip()
-    length = data.get("length", "concise").lower()  # new parameter
+    length = data.get("length", "concise").lower()
 
     if not question:
         return jsonify({"error": "No question provided."}), 400
     if not memory_vectors:
         return jsonify({"answer": "Memory is empty. Please upload files or fetch a URL first."})
 
-    # ---- Retrieve relevant context ----
     q_emb = embed_text(question)
     index = faiss.IndexFlatL2(len(q_emb))
     index.add(np.stack(memory_vectors))
     _, I = index.search(np.array([q_emb]), k=min(5, len(memory_vectors)))
     context = "\n\n".join([memory_texts[i] for i in I[0]])
 
-    # ---- Adjust token range based on answer length ----
     if length == "balanced":
         max_tokens = 800
         instruction = "Write a clear, well-developed explanation (2–4 paragraphs)."
     elif length == "detailed":
         max_tokens = 1500
-        instruction = "Write a detailed, structured report (about one page, with clarity and flow)."
+        instruction = "Write a detailed, structured report (about one page)."
     else:
         max_tokens = 250
         instruction = "Provide a concise, direct answer (2–5 sentences)."
 
-    # ---- Construct prompt ----
     prompt = f"""
 You are a precise and factual AI assistant.
-
-Your goal is to answer the user's question based strictly on the provided context.
-Do not add assumptions or outside information.
+Base your answer strictly on the provided context — do not invent information.
 {instruction}
 
 If the context does not contain enough information to answer fully, state that briefly.
@@ -212,46 +194,28 @@ User Question:
 {question}
 """
 
-    model_order = ["gpt-5", "gpt-4o", "gpt-4o-mini"]
-    last_err = None
-    for m in model_order:
-        try:
-            completion = client.chat.completions.create(
-                model=m,
-                messages=[
-                    {"role": "system", "content": "You are factual, organized, and professional."},
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=max_tokens,
-                temperature=0.3
-            )
-            answer = completion.choices[0].message.content
-            return jsonify({
-                "answer": answer,
-                "model_used": m,
-                "mode": length
-            })
-        except Exception as e:
-            last_err = str(e)
-            continue
-
-    return jsonify({"answer": f"Error generating answer: {last_err}"}), 500
+    try:
+        completion = client.chat.completions.create(
+            model="gpt-5",
+            messages=[
+                {"role": "system", "content": "You are factual, organized, and professional."},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=max_tokens,
+        )
+        answer = completion.choices[0].message.content
+        return jsonify({"answer": answer, "model_used": "gpt-5", "mode": length})
+    except Exception as e:
+        return jsonify({"answer": f"Error generating answer: {str(e)}"}), 500
 
 
-# -------------------------------------------------------------------
-# ♻️ RESET MEMORY
-# -------------------------------------------------------------------
 @app.route("/reset", methods=["POST"])
 def reset_memory():
-    """Clear short-term memory."""
     global memory_vectors, memory_texts
     memory_vectors.clear()
     memory_texts.clear()
     return jsonify({"message": "♻️ Short-term memory cleared."})
 
 
-# -------------------------------------------------------------------
-# ✅ MAIN ENTRY
-# -------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
