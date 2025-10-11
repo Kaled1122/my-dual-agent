@@ -10,23 +10,21 @@ from pptx import Presentation
 from bs4 import BeautifulSoup
 
 # -------------------------------------------------------------------
-# ✅ APP SETUP
+# APP SETUP
 # -------------------------------------------------------------------
 app = Flask(__name__)
 CORS(app)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ---- Short-term memory containers (RAM only) ----
+# Short-term memory (RAM only)
 memory_vectors = []
 memory_texts = []
 
-
 # -------------------------------------------------------------------
-# ✅ UTILITIES
+# UTILITIES
 # -------------------------------------------------------------------
 def embed_text(text: str) -> np.ndarray:
-    """Generate an embedding vector for the given text."""
     try:
         emb = client.embeddings.create(
             input=text,
@@ -37,12 +35,9 @@ def embed_text(text: str) -> np.ndarray:
         print("Embedding error:", e)
         return np.zeros(1536, dtype="float32")
 
-
 def extract_text(file):
-    """Extract readable text from multiple document formats."""
     name = file.filename.lower()
 
-    # PDF
     if name.endswith(".pdf"):
         try:
             reader = PdfReader(file)
@@ -50,12 +45,10 @@ def extract_text(file):
         except Exception:
             return ""
 
-    # DOCX
     elif name.endswith(".docx"):
         doc = Document(file)
         return "\n".join([p.text for p in doc.paragraphs])
 
-    # EXCEL / CSV
     elif name.endswith((".xls", ".xlsx", ".csv")):
         try:
             df = pd.read_excel(file) if not name.endswith(".csv") else pd.read_csv(file)
@@ -63,7 +56,6 @@ def extract_text(file):
         except Exception:
             return ""
 
-    # POWERPOINT
     elif name.endswith(".pptx"):
         try:
             prs = Presentation(file)
@@ -76,7 +68,6 @@ def extract_text(file):
         except Exception:
             return ""
 
-    # HTML
     elif name.endswith((".html", ".htm")):
         try:
             soup = BeautifulSoup(file.read(), "html.parser")
@@ -84,20 +75,17 @@ def extract_text(file):
         except Exception:
             return ""
 
-    # Plain text / other
     else:
         try:
             return file.read().decode("utf-8", errors="ignore")
         except Exception:
             return ""
 
-
 # -------------------------------------------------------------------
-# ✅ ROUTES
+# ROUTES
 # -------------------------------------------------------------------
 @app.route("/upload", methods=["POST"])
 def upload_files():
-    """Upload and embed files into short-term memory."""
     global memory_vectors, memory_texts
     files = request.files.getlist("files")
     if not files:
@@ -109,15 +97,13 @@ def upload_files():
         if text.strip():
             emb = embed_text(text)
             memory_vectors.append(emb)
-            memory_texts.append(text[:4000])  # larger context window
+            memory_texts.append(text[:4000])  # larger snippet for richer context
             count += 1
 
-    return jsonify({"message": f"✅ Uploaded {count} file(s) to short-term memory."})
-
+    return jsonify({"message": f"Uploaded {count} file(s) to short-term memory."})
 
 @app.route("/ask", methods=["POST"])
 def ask_question():
-    """Answer questions based on short-term memory context."""
     global memory_vectors, memory_texts
     data = request.get_json()
     question = data.get("question", "").strip()
@@ -127,64 +113,64 @@ def ask_question():
     if not memory_vectors:
         return jsonify({"answer": "Memory is empty. Please upload files first."})
 
-    # ---- find relevant context ----
+    # Retrieve top-k relevant snippets
     q_emb = embed_text(question)
     index = faiss.IndexFlatL2(len(q_emb))
     index.add(np.stack(memory_vectors))
     _, I = index.search(np.array([q_emb]), k=min(3, len(memory_vectors)))
-
     context = "\n\n".join([memory_texts[i] for i in I[0]])
 
-    # ---- professional long-form prompt ----
+    # Long-form report prompt
     prompt = f"""
-You are an AI research and analysis assistant powered by GPT-5.
-Your task is to read and interpret the uploaded document excerpts below.
+You are an AI research and analysis assistant.
+Base your answer strictly on the provided context—do not invent details.
 
-Base your answer strictly on the given content—do not invent details.
-Organize the response as a **detailed 1–2 page analytical report** with the following qualities:
-- Clear introduction and context summary
-- Well-structured explanation of the key concepts
-- Examples or evidence drawn directly from the material
-- Logical transitions and concise professional language
-- Factual accuracy with no assumptions beyond the context
+Write a detailed 1–2 page analytical report with:
+- A short introduction summarizing the context
+- Clear, logically ordered sections
+- Evidence/examples cited directly from the context
+- Concise, professional language
+- A brief conclusion
+If the context lacks required details, state that transparently.
 
 Context:
 {context}
 
 User Question:
 {question}
-
-Write a full, formal report-style answer that could be shown to executives or trainees.
 """
 
-    try:
-        completion = client.chat.completions.create(
-            model="gpt-5",  # upgraded model
-            messages=[
-                {"role": "system",
-                 "content": "You are a precise, factual, and professional AI analyst."},
-                {"role": "user", "content": prompt},
-            ],
-            max_output_tokens=1500  # extended for 1–2 page report
-        )
-        answer = completion.choices[0].message.content
-    except Exception as e:
-        answer = f"⚠️ Error: {e}"
+    # Try GPT-5; if not available, fall back
+    model_order = ["gpt-5", "gpt-4o", "gpt-4o-mini"]
+    last_err = None
+    for m in model_order:
+        try:
+            completion = client.chat.completions.create(
+                model=m,
+                messages=[
+                    {"role": "system", "content": "You are precise, factual, and professional."},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=1500,         # <-- correct param for chat.completions
+                temperature=0.3          # tighter, more factual long-form
+            )
+            answer = completion.choices[0].message.content
+            return jsonify({"answer": answer, "model_used": m})
+        except Exception as e:
+            last_err = str(e)
+            continue
 
-    return jsonify({"answer": answer})
-
+    return jsonify({"answer": f"Error generating answer: {last_err}"}), 500
 
 @app.route("/reset", methods=["POST"])
 def reset_memory():
-    """Clear short-term memory."""
     global memory_vectors, memory_texts
     memory_vectors.clear()
     memory_texts.clear()
-    return jsonify({"message": "♻️ Short-term memory cleared."})
-
+    return jsonify({"message": "Short-term memory cleared."})
 
 # -------------------------------------------------------------------
-# ✅ MAIN
+# MAIN
 # -------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
