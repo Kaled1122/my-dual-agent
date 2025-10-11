@@ -25,7 +25,7 @@ memory_texts = []
 # ✅ UTILITIES
 # -------------------------------------------------------------------
 def embed_text(text: str) -> np.ndarray:
-    """Generate embedding vector for given text using OpenAI."""
+    """Generate embedding vector using OpenAI embeddings."""
     try:
         emb = client.embeddings.create(
             input=text,
@@ -35,6 +35,7 @@ def embed_text(text: str) -> np.ndarray:
     except Exception as e:
         print("Embedding error:", e)
         return np.zeros(1536, dtype="float32")
+
 
 def extract_text(file):
     """Extract readable text from multiple document formats."""
@@ -77,14 +78,16 @@ def extract_text(file):
         except Exception:
             return ""
 
+
 def chunk_text(text, size=4000, overlap=200):
-    """Split long text into safe overlapping chunks."""
+    """Split text into overlapping chunks for embedding."""
     chunks, start = [], 0
     while start < len(text):
         end = start + size
         chunks.append(text[start:end])
         start += size - overlap
     return chunks
+
 
 # -------------------------------------------------------------------
 # ✅ ROUTES
@@ -109,6 +112,7 @@ def upload_files():
         count += 1
 
     return jsonify({"message": f"✅ Uploaded {count} file(s) to short-term memory."})
+
 
 @app.route("/url", methods=["POST"])
 def upload_url():
@@ -136,6 +140,7 @@ def upload_url():
         memory_texts.append(chunk)
 
     return jsonify({"message": f"✅ Page from {url} added to short-term memory."})
+
 
 @app.route("/ask", methods=["POST"])
 def ask_question():
@@ -194,12 +199,30 @@ User Question:
                 {"role": "system", "content": "You are factual, organized, and professional."},
                 {"role": "user", "content": prompt},
             ],
-            max_completion_tokens=max_tokens  # ✅ modern GPT-5 param
+            max_completion_tokens=max_tokens
         )
-        answer = completion.choices[0].message.content
+
+        # ✅ Safe extraction for GPT-5 new response structure
+        answer = None
+        choice = completion.choices[0]
+        if hasattr(choice, "message") and getattr(choice.message, "content", None):
+            answer = choice.message.content
+        elif hasattr(choice, "content") and choice.content:
+            answer = choice.content
+        elif isinstance(choice, dict) and "content" in choice:
+            answer = choice["content"]
+
+        if not answer or not str(answer).strip():
+            answer = "⚠️ GPT-5 returned no textual output. Try rephrasing or simplifying the question."
+
+        # Debug optional
+        # print("GPT-5 raw response:", completion.model_dump())
+
         return jsonify({"answer": answer, "model_used": "gpt-5", "mode": length})
+
     except Exception as e:
         return jsonify({"answer": f"Error generating answer: {str(e)}"}), 500
+
 
 @app.route("/reset", methods=["POST"])
 def reset_memory():
@@ -208,5 +231,9 @@ def reset_memory():
     memory_texts.clear()
     return jsonify({"message": "♻️ Short-term memory cleared."})
 
+
+# -------------------------------------------------------------------
+# ✅ MAIN ENTRY
+# -------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
