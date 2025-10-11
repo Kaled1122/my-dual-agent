@@ -109,7 +109,7 @@ def upload_files():
         if text.strip():
             emb = embed_text(text)
             memory_vectors.append(emb)
-            memory_texts.append(text[:2000])  # keep a snippet
+            memory_texts.append(text[:4000])  # larger context window
             count += 1
 
     return jsonify({"message": f"✅ Uploaded {count} file(s) to short-term memory."})
@@ -135,10 +135,18 @@ def ask_question():
 
     context = "\n\n".join([memory_texts[i] for i in I[0]])
 
-    # ---- professional assistant prompt ----
+    # ---- professional long-form prompt ----
     prompt = f"""
-You are an AI assistant helping users analyze their uploaded documents.
-Base your answer strictly on the context below, without adding outside information or assumptions.
+You are an AI research and analysis assistant powered by GPT-5.
+Your task is to read and interpret the uploaded document excerpts below.
+
+Base your answer strictly on the given content—do not invent details.
+Organize the response as a **detailed 1–2 page analytical report** with the following qualities:
+- Clear introduction and context summary
+- Well-structured explanation of the key concepts
+- Examples or evidence drawn directly from the material
+- Logical transitions and concise professional language
+- Factual accuracy with no assumptions beyond the context
 
 Context:
 {context}
@@ -146,20 +154,18 @@ Context:
 User Question:
 {question}
 
-Provide a clear, concise, and professional answer that directly addresses the question.
-If the context does not contain the answer, say so honestly.
+Write a full, formal report-style answer that could be shown to executives or trainees.
 """
 
     try:
         completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5",  # upgraded model
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are a precise, factual, and professional assistant.",
-                },
+                {"role": "system",
+                 "content": "You are a precise, factual, and professional AI analyst."},
                 {"role": "user", "content": prompt},
             ],
+            max_output_tokens=1500  # extended for 1–2 page report
         )
         answer = completion.choices[0].message.content
     except Exception as e:
