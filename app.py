@@ -8,7 +8,7 @@ from docx import Document
 import pandas as pd
 from pptx import Presentation
 from bs4 import BeautifulSoup
-import requests  # 👈 Added for URL fetching
+import requests  # 🌐 URL fetching
 
 # -------------------------------------------------------------------
 # ✅ APP SETUP
@@ -162,17 +162,18 @@ def upload_url():
 
 
 # -------------------------------------------------------------------
-# 🤖 Ask endpoint (concise answers)
+# 🤖 ASK ENDPOINT WITH ANSWER LENGTH MODES
 # -------------------------------------------------------------------
 @app.route("/ask", methods=["POST"])
 def ask_question():
-    """Answer concisely based on short-term memory context."""
+    """Answer based on context with variable length modes."""
     global memory_vectors, memory_texts
     data = request.get_json()
     question = data.get("question", "").strip()
+    length = data.get("length", "concise").lower()  # new parameter
+
     if not question:
         return jsonify({"error": "No question provided."}), 400
-
     if not memory_vectors:
         return jsonify({"answer": "Memory is empty. Please upload files or fetch a URL first."})
 
@@ -183,20 +184,26 @@ def ask_question():
     _, I = index.search(np.array([q_emb]), k=min(5, len(memory_vectors)))
     context = "\n\n".join([memory_texts[i] for i in I[0]])
 
-    # ---- Concise professional prompt ----
+    # ---- Adjust token range based on answer length ----
+    if length == "balanced":
+        max_tokens = 800
+        instruction = "Write a clear, well-developed explanation (2–4 paragraphs)."
+    elif length == "detailed":
+        max_tokens = 1500
+        instruction = "Write a detailed, structured report (about one page, with clarity and flow)."
+    else:
+        max_tokens = 250
+        instruction = "Provide a concise, direct answer (2–5 sentences)."
+
+    # ---- Construct prompt ----
     prompt = f"""
 You are a precise and factual AI assistant.
 
-Your goal is to answer the user's question as clearly and efficiently as possible,
-based strictly on the provided context from uploaded or fetched documents.
+Your goal is to answer the user's question based strictly on the provided context.
 Do not add assumptions or outside information.
-Focus on accuracy and brevity.
+{instruction}
 
-Guidelines:
-- Keep your answer between 2 and 5 sentences.
-- Use complete sentences, not bullet points.
-- Avoid unnecessary repetition or restating the question.
-- If the context does not contain enough information to answer, state that briefly.
+If the context does not contain enough information to answer fully, state that briefly.
 
 Context:
 {context}
@@ -212,17 +219,18 @@ User Question:
             completion = client.chat.completions.create(
                 model=m,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a concise, factual assistant who answers in 2–5 sentences.",
-                    },
+                    {"role": "system", "content": "You are factual, organized, and professional."},
                     {"role": "user", "content": prompt},
                 ],
-                max_tokens=250,
-                temperature=0.2
+                max_tokens=max_tokens,
+                temperature=0.3
             )
             answer = completion.choices[0].message.content
-            return jsonify({"answer": answer, "model_used": m})
+            return jsonify({
+                "answer": answer,
+                "model_used": m,
+                "mode": length
+            })
         except Exception as e:
             last_err = str(e)
             continue
@@ -230,6 +238,9 @@ User Question:
     return jsonify({"answer": f"Error generating answer: {last_err}"}), 500
 
 
+# -------------------------------------------------------------------
+# ♻️ RESET MEMORY
+# -------------------------------------------------------------------
 @app.route("/reset", methods=["POST"])
 def reset_memory():
     """Clear short-term memory."""
