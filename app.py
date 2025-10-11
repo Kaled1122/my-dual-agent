@@ -164,12 +164,14 @@ def ask_question():
     if not memory_vectors:
         return jsonify({"answer": "Memory is empty. Please upload files or fetch a URL first."})
 
+    # ---- Context retrieval ----
     q_emb = embed_text(question)
     index = faiss.IndexFlatL2(len(q_emb))
     index.add(np.stack(memory_vectors))
     _, I = index.search(np.array([q_emb]), k=min(5, len(memory_vectors)))
     context = "\n\n".join([memory_texts[i] for i in I[0]])
 
+    # ---- Output length modes ----
     if length == "balanced":
         max_tokens = 800
         instruction = "Write a clear, well-developed explanation (2–4 paragraphs)."
@@ -201,7 +203,8 @@ User Question:
                 {"role": "system", "content": "You are factual, organized, and professional."},
                 {"role": "user", "content": prompt},
             ],
-            max_tokens=max_tokens,
+            max_completion_tokens=max_tokens,  # ✅ updated for GPT-5
+            temperature=0.3
         )
         answer = completion.choices[0].message.content
         return jsonify({"answer": answer, "model_used": "gpt-5", "mode": length})
