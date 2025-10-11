@@ -11,27 +11,70 @@
       color: #1d1d1f;
     }
     .card {
-      max-width: 700px; margin: auto;
-      background: #fff; border-radius: 20px;
-      padding: 40px; box-shadow: 0 6px 24px rgba(0,0,0,0.1);
+      max-width: 700px;
+      margin: auto;
+      background: #fff;
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.1);
     }
-    h1 { text-align: center; font-size: 26px; margin-bottom: 30px; }
-    label { font-weight: 500; display: block; margin-top: 18px; }
-    input[type=file], textarea {
-      width: 100%; margin-top: 8px; padding: 12px;
-      border: 1px solid #d1d1d6; border-radius: 10px;
-      font-size: 15px; background: #fafafa;
+    h1 {
+      text-align: center;
+      font-size: 26px;
+      margin-bottom: 30px;
+      letter-spacing: -0.3px;
+    }
+    label {
+      font-weight: 500;
+      display: block;
+      margin-top: 18px;
+    }
+    input[type=file],
+    textarea {
+      width: 100%;
+      margin-top: 8px;
+      padding: 12px;
+      border: 1px solid #d1d1d6;
+      border-radius: 10px;
+      font-size: 15px;
+      background: #fafafa;
     }
     button {
-      width: 100%; padding: 13px 0; margin-top: 15px;
-      border: none; border-radius: 10px;
-      font-size: 16px; font-weight: 600; color: #fff;
-      background: #000; cursor: pointer;
+      width: 100%;
+      padding: 13px 0;
+      margin-top: 15px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+      background: #000;
+      cursor: pointer;
+      transition: background 0.25s ease;
     }
     button:hover { background: #1d1d1f; }
-    .status, .answer { margin-top: 12px; font-size: 15px; }
+    .status, .answer {
+      margin-top: 12px;
+      font-size: 15px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
     .green { background:#34c759; }
-    .red { background:#ff3b30; }
+    .supported {
+      background: #f8f8f8;
+      padding: 14px 18px;
+      border-radius: 10px;
+      margin-top: 8px;
+      font-size: 14px;
+      line-height: 1.6;
+      border: 1px solid #e2e2e7;
+    }
+    .supported strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+    .supported li { margin-bottom: 4px; }
   </style>
 </head>
 <body>
@@ -43,6 +86,16 @@
     <button onclick="uploadFiles()">Upload</button>
     <p id="status" class="status"></p>
 
+    <ul class="supported">
+      <strong>Supported File Types:</strong>
+      <li><b>PDF (.pdf)</b> — Text-based documents (not scanned images)</li>
+      <li><b>Word (.docx)</b> — Extracts all paragraph text</li>
+      <li><b>Excel / CSV (.xls, .xlsx, .csv)</b> — Reads spreadsheet data</li>
+      <li><b>PowerPoint (.pptx)</b> — Captures text from slides</li>
+      <li><b>HTML (.html, .htm)</b> — Extracts visible page text</li>
+      <li><b>Text (.txt, .md, .json, .log)</b> — Any plain-text files</li>
+    </ul>
+
     <hr>
 
     <label>Ask a Question</label>
@@ -51,11 +104,12 @@
     <div id="answer" class="answer"></div>
 
     <hr>
-    <button class="green" onclick="resetMemory()">♻️ Reset Short-Term Memory</button>
+    <button class="green" onclick="resetMemory()">Reset Short-Term Memory</button>
     <p id="resetStatus" class="status"></p>
   </div>
 
   <script>
+    // Replace with your deployed backend URL on Render
     const API_URL = "https://my-dual-agent.onrender.com";
 
     async function uploadFiles() {
@@ -65,13 +119,13 @@
       const formData = new FormData();
       for (let f of files) formData.append("files", f);
 
-      document.getElementById("status").innerText = "⏳ Uploading...";
+      document.getElementById("status").innerText = "Uploading...";
       try {
         const res = await fetch(`${API_URL}/upload`, { method: "POST", body: formData });
         const data = await res.json();
         document.getElementById("status").innerText = data.message || data.error;
       } catch (err) {
-        document.getElementById("status").innerText = "❌ " + err.message;
+        document.getElementById("status").innerText = "Error: " + err.message;
       }
     }
 
@@ -79,7 +133,7 @@
       const q = document.getElementById("question").value.trim();
       if (!q) return alert("Enter a question first.");
 
-      document.getElementById("answer").innerText = "⏳ Thinking...";
+      document.getElementById("answer").innerText = "Thinking...";
       try {
         const res = await fetch(`${API_URL}/ask`, {
           method: "POST",
@@ -89,7 +143,7 @@
         const data = await res.json();
         document.getElementById("answer").innerText = data.answer || data.error;
       } catch (err) {
-        document.getElementById("answer").innerText = "❌ " + err.message;
+        document.getElementById("answer").innerText = "Error: " + err.message;
       }
     }
 
@@ -99,7 +153,7 @@
         const data = await res.json();
         document.getElementById("resetStatus").innerText = data.message;
       } catch (err) {
-        document.getElementById("resetStatus").innerText = "❌ " + err.message;
+        document.getElementById("resetStatus").innerText = "Error: " + err.message;
       }
     }
   </script>
