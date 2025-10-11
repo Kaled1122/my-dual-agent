@@ -38,6 +38,7 @@
       border-radius: 10px;
       font-size: 15px;
       background: #fafafa;
+      resize: vertical;
     }
     button {
       width: 100%;
@@ -81,6 +82,15 @@
   <div class="card">
     <h1>Short-Memory File Agent</h1>
 
+    <!-- 🌐 URL FETCH AREA -->
+    <label>Paste Web Page URLs (one per line)</label>
+    <textarea id="urlInput" placeholder="https://example.com/page1\nhttps://example.com/page2" rows="4"></textarea>
+    <button onclick="fetchUrls()">Fetch Pages</button>
+    <p id="urlStatus" class="status"></p>
+
+    <hr>
+
+    <!-- 📁 FILE UPLOAD -->
     <label>Upload Files</label>
     <input type="file" id="fileInput" multiple />
     <button onclick="uploadFiles()">Upload</button>
@@ -98,8 +108,9 @@
 
     <hr>
 
+    <!-- ❓ ASK -->
     <label>Ask a Question</label>
-    <textarea id="question" placeholder="Type your question..."></textarea>
+    <textarea id="question" placeholder="Type your question..." rows="3"></textarea>
     <button onclick="askQuestion()">Ask</button>
     <div id="answer" class="answer"></div>
 
@@ -109,9 +120,40 @@
   </div>
 
   <script>
-    // Replace with your deployed backend URL on Render
-    const API_URL = "https://my-dual-agent.onrender.com";
+    const API_URL = "https://my-dual-agent.onrender.com"; // replace with your Render backend URL
 
+    // --------------------------------------------------------------------
+    // 🌐 FETCH MULTIPLE URLS
+    // --------------------------------------------------------------------
+    async function fetchUrls() {
+      const raw = document.getElementById("urlInput").value.trim();
+      if (!raw) return alert("Please paste at least one URL.");
+
+      const urls = raw.split(/\n+/).map(u => u.trim()).filter(Boolean);
+      if (!urls.length) return alert("No valid URLs detected.");
+
+      document.getElementById("urlStatus").innerText = "Fetching pages...";
+      let results = [];
+
+      for (const url of urls) {
+        try {
+          const res = await fetch(`${API_URL}/url`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url })
+          });
+          const data = await res.json();
+          results.push(`${url} → ${data.message || data.error}`);
+        } catch (err) {
+          results.push(`${url} → Error: ${err.message}`);
+        }
+      }
+      document.getElementById("urlStatus").innerText = results.join("\n");
+    }
+
+    // --------------------------------------------------------------------
+    // 📁 FILE UPLOAD
+    // --------------------------------------------------------------------
     async function uploadFiles() {
       const files = document.getElementById("fileInput").files;
       if (!files.length) return alert("No files selected.");
@@ -129,6 +171,9 @@
       }
     }
 
+    // --------------------------------------------------------------------
+    // ❓ ASK QUESTION
+    // --------------------------------------------------------------------
     async function askQuestion() {
       const q = document.getElementById("question").value.trim();
       if (!q) return alert("Enter a question first.");
@@ -147,6 +192,9 @@
       }
     }
 
+    // --------------------------------------------------------------------
+    // ♻️ RESET MEMORY
+    // --------------------------------------------------------------------
     async function resetMemory() {
       try {
         const res = await fetch(`${API_URL}/reset`, { method: "POST" });
