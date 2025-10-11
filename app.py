@@ -204,7 +204,7 @@ User Question:
                 {"role": "user", "content": prompt},
             ],
             max_completion_tokens=max_tokens,  # ✅ updated for GPT-5
-            temperature=0.3
+            temperature=1
         )
         answer = completion.choices[0].message.content
         return jsonify({"answer": answer, "model_used": "gpt-5", "mode": length})
