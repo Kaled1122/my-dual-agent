@@ -131,7 +131,7 @@ def upload_files():
 
 @app.route("/ask", methods=["POST"])
 def ask_question():
-    """Generate long-form analytical report based on short-term memory."""
+    """Answer concisely based on short-term memory context."""
     global memory_vectors, memory_texts
     data = request.get_json()
     question = data.get("question", "").strip()
@@ -148,19 +148,20 @@ def ask_question():
     _, I = index.search(np.array([q_emb]), k=min(5, len(memory_vectors)))
     context = "\n\n".join([memory_texts[i] for i in I[0]])
 
-    # ---- Structured professional report prompt ----
+    # ---- Concise professional prompt ----
     prompt = f"""
-You are an AI research and analysis assistant.
-Base your report strictly on the context below — do not invent information.
+You are a precise and factual AI assistant.
 
-Write a detailed 1–2 page analytical report including:
-- A short introduction summarizing the context
-- Clear, logically ordered sections with headings if appropriate
-- Evidence or examples drawn directly from the context
-- Professional, factual tone suitable for executives or training materials
-- A concise concluding summary
+Your goal is to answer the user's question as clearly and efficiently as possible,
+based strictly on the provided context from uploaded documents.
+Do not add assumptions or outside information.
+Focus on accuracy and brevity.
 
-If the provided context lacks information, state that transparently.
+Guidelines:
+- Keep your answer between 2 and 5 sentences.
+- Use complete sentences, not bullet points.
+- Avoid unnecessary repetition or restating the question.
+- If the context does not contain enough information to answer, state that briefly.
 
 Context:
 {context}
@@ -169,7 +170,6 @@ User Question:
 {question}
 """
 
-    # ---- Try GPT-5 first; fallback to GPT-4o/mini ----
     model_order = ["gpt-5", "gpt-4o", "gpt-4o-mini"]
     last_err = None
     for m in model_order:
@@ -177,12 +177,14 @@ User Question:
             completion = client.chat.completions.create(
                 model=m,
                 messages=[
-                    {"role": "system",
-                     "content": "You are precise, factual, and professional."},
+                    {
+                        "role": "system",
+                        "content": "You are a concise, factual assistant who answers in 2–5 sentences.",
+                    },
                     {"role": "user", "content": prompt},
                 ],
-                max_tokens=400,   # allows long, 1–2 page reports
-                temperature= 1    # low randomness = factual consistency
+                max_tokens=250,   # short, crisp answers
+                temperature=0.2   # low creativity = stable tone
             )
             answer = completion.choices[0].message.content
             return jsonify({"answer": answer, "model_used": m})
