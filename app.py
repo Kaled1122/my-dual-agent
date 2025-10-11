@@ -8,6 +8,7 @@ from docx import Document
 import pandas as pd
 from pptx import Presentation
 from bs4 import BeautifulSoup
+import requests  # 👈 Added for URL fetching
 
 # -------------------------------------------------------------------
 # ✅ APP SETUP
@@ -129,6 +130,40 @@ def upload_files():
     return jsonify({"message": f"✅ Uploaded {count} file(s) to short-term memory."})
 
 
+# -------------------------------------------------------------------
+# 🌐 NEW: Fetch and embed webpage content
+# -------------------------------------------------------------------
+@app.route("/url", methods=["POST"])
+def upload_url():
+    """Fetch and embed a webpage directly from a URL."""
+    global memory_vectors, memory_texts
+    data = request.get_json()
+    url = data.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "No URL provided."}), 400
+
+    try:
+        res = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "html.parser")
+        text = soup.get_text()
+    except Exception as e:
+        return jsonify({"error": f"Failed to fetch or parse: {e}"}), 500
+
+    if not text.strip():
+        return jsonify({"error": "No readable text found on the page."}), 400
+
+    for chunk in chunk_text(text):
+        emb = embed_text(chunk)
+        memory_vectors.append(emb)
+        memory_texts.append(chunk)
+
+    return jsonify({"message": f"✅ Page from {url} added to short-term memory."})
+
+
+# -------------------------------------------------------------------
+# 🤖 Ask endpoint (concise answers)
+# -------------------------------------------------------------------
 @app.route("/ask", methods=["POST"])
 def ask_question():
     """Answer concisely based on short-term memory context."""
@@ -139,7 +174,7 @@ def ask_question():
         return jsonify({"error": "No question provided."}), 400
 
     if not memory_vectors:
-        return jsonify({"answer": "Memory is empty. Please upload files first."})
+        return jsonify({"answer": "Memory is empty. Please upload files or fetch a URL first."})
 
     # ---- Retrieve relevant context ----
     q_emb = embed_text(question)
@@ -153,7 +188,7 @@ def ask_question():
 You are a precise and factual AI assistant.
 
 Your goal is to answer the user's question as clearly and efficiently as possible,
-based strictly on the provided context from uploaded documents.
+based strictly on the provided context from uploaded or fetched documents.
 Do not add assumptions or outside information.
 Focus on accuracy and brevity.
 
@@ -183,8 +218,8 @@ User Question:
                     },
                     {"role": "user", "content": prompt},
                 ],
-                max_tokens=250,   # short, crisp answers
-                temperature=0.2   # low creativity = stable tone
+                max_tokens=250,
+                temperature=0.2
             )
             answer = completion.choices[0].message.content
             return jsonify({"answer": answer, "model_used": m})
