@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: dual-memory-file-agent
+    name: short-memory-file-agent
     env: docker
     plan: free
     autoDeploy: true
