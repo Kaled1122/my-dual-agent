@@ -1,270 +1,184 @@
-import os, numpy as np
+import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from openai import OpenAI
-import faiss
+import faiss, numpy as np
 from PyPDF2 import PdfReader
-import docx
-from pdf2image import convert_from_bytes
-import pytesseract
-from PIL import Image
+from docx import Document
 import pandas as pd
-from bs4 import BeautifulSoup
-import requests
 from pptx import Presentation
-from datetime import datetime
+from bs4 import BeautifulSoup
 
-# ---------- SETUP ----------
+# -------------------------------------------------------------------
+# ✅ APP SETUP
+# -------------------------------------------------------------------
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+CORS(app)
 
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    raise ValueError("❌ Missing OPENAI_API_KEY. Set it in Render Environment Variables.")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-client = OpenAI(api_key=api_key)
+# ---- Short-term memory containers (RAM only) ----
+memory_vectors = []
+memory_texts = []
 
-# ---------- UTILITIES ----------
+
+# -------------------------------------------------------------------
+# ✅ UTILITIES
+# -------------------------------------------------------------------
+def embed_text(text: str) -> np.ndarray:
+    """Generate an embedding vector for the given text."""
+    try:
+        emb = client.embeddings.create(
+            input=text,
+            model="text-embedding-3-small"
+        ).data[0].embedding
+        return np.array(emb, dtype="float32")
+    except Exception as e:
+        print("Embedding error:", e)
+        return np.zeros(1536, dtype="float32")
+
+
 def extract_text(file):
-    """Extract readable text or transcriptions from all supported file types."""
+    """Extract readable text from multiple document formats."""
     name = file.filename.lower()
 
-    # ---- PDF ----
+    # PDF
     if name.endswith(".pdf"):
         try:
             reader = PdfReader(file)
-            text = "\n".join([page.extract_text() or "" for page in reader.pages])
+            return "\n".join([p.extract_text() or "" for p in reader.pages])
         except Exception:
-            text = ""
-        if not text.strip():
-            file.seek(0)
-            images = convert_from_bytes(file.read())
-            text = "\n".join([pytesseract.image_to_string(img) for img in images])
-        return text
+            return ""
 
-    # ---- Word ----
+    # DOCX
     elif name.endswith(".docx"):
-        doc = docx.Document(file)
+        doc = Document(file)
         return "\n".join([p.text for p in doc.paragraphs])
 
-    # ---- Text / URL ----
-    elif name.endswith(".txt"):
-        text = file.read().decode("utf-8").strip()
-        if text.startswith("http://") or text.startswith("https://"):
-            try:
-                html = requests.get(text).text
-                soup = BeautifulSoup(html, "html.parser")
-                return soup.get_text(separator="\n", strip=True)
-            except Exception as e:
-                return f"[Error loading web page: {e}]"
-        return text
-
-    # ---- Images ----
-    elif name.endswith((".jpg", ".jpeg", ".png")):
-        img = Image.open(file)
-        return pytesseract.image_to_string(img)
-
-    # ---- Excel / CSV ----
-    elif name.endswith((".xlsx", ".xls", ".csv")):
+    # EXCEL / CSV
+    elif name.endswith((".xls", ".xlsx", ".csv")):
         try:
-            if name.endswith(".csv"):
-                df = pd.read_csv(file)
-            else:
-                df = pd.read_excel(file)
-            text = "\n".join(df.astype(str).fillna("").values.flatten())
-            return text
-        except Exception as e:
-            return f"[Error reading Excel/CSV: {e}]"
+            df = pd.read_excel(file) if not name.endswith(".csv") else pd.read_csv(file)
+            return df.to_string()
+        except Exception:
+            return ""
 
-    # ---- HTML ----
-    elif name.endswith((".html", ".htm")):
-        try:
-            soup = BeautifulSoup(file.read(), "html.parser")
-            return soup.get_text(separator="\n", strip=True)
-        except Exception as e:
-            return f"[Error reading HTML: {e}]"
-
-    # ---- PowerPoint ----
+    # POWERPOINT
     elif name.endswith(".pptx"):
         try:
             prs = Presentation(file)
-            text_runs = []
+            texts = []
             for slide in prs.slides:
                 for shape in slide.shapes:
                     if hasattr(shape, "text"):
-                        text_runs.append(shape.text)
-            return "\n".join(text_runs)
-        except Exception as e:
-            return f"[Error reading PPTX: {e}]"
+                        texts.append(shape.text)
+            return "\n".join(texts)
+        except Exception:
+            return ""
 
-    # ---- Audio ----
-    elif name.endswith((".mp3", ".wav", ".m4a")):
-        file.seek(0)
-        temp_path = "temp_audio.mp3"
-        with open(temp_path, "wb") as f:
-            f.write(file.read())
-        with open(temp_path, "rb") as f:
-            transcript = client.audio.transcriptions.create(
-                model="gpt-4o-mini-transcribe",
-                file=f
-            )
-        os.remove(temp_path)
-        return transcript.text
+    # HTML
+    elif name.endswith((".html", ".htm")):
+        try:
+            soup = BeautifulSoup(file.read(), "html.parser")
+            return soup.get_text()
+        except Exception:
+            return ""
 
-    return ""
+    # Plain text / other
+    else:
+        try:
+            return file.read().decode("utf-8", errors="ignore")
+        except Exception:
+            return ""
 
-def make_embeddings(texts):
-    """Convert texts into embeddings."""
-    chunks, chunk_size = [], 500
-    for t in texts:
-        if isinstance(t, str) and t.strip():
-            words = t.split()
-            for i in range(0, len(words), chunk_size):
-                chunk = " ".join(words[i:i + chunk_size]).strip()
-                if chunk:
-                    chunks.append(chunk)
 
-    if not chunks:
-        raise ValueError("No valid text found to embed.")
-
-    embeds = client.embeddings.create(model="text-embedding-3-small", input=chunks)
-    vectors = [d.embedding for d in embeds.data]
-    return chunks, np.array(vectors).astype("float32")
-
-def ask_gpt(question, context):
-    if not context.strip():
-        return "⚠️ No relevant information found. Try uploading documents first."
-
-    prompt = f"""
-You are a precise assistant that answers **only** using the information inside <context> tags.
-If the answer cannot be found in the context, reply exactly:
-"I couldn’t find that information in the uploaded files."
-
-<context>
-{context}
-</context>
-
-Question: {question}
-"""
-    chat = client.chat.completions.create(
-        model="gpt-5",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return chat.choices[0].message.content.strip()
-
-# ---------- MEMORY ----------
-temp_index = faiss.IndexFlatL2(1536)
-master_index = faiss.IndexFlatL2(1536)
-temp_chunks, master_chunks = [], []
-
-# Track file metadata
-master_files = []  # [{"name": ..., "timestamp": ..., "count": ...}, ...]
-temp_files = []
-
-# ---------- ROUTES ----------
-@app.route("/")
-def home():
-    return jsonify({"status": "ok", "message": "✅ File Agent backend running successfully!"})
-
+# -------------------------------------------------------------------
+# ✅ ROUTES
+# -------------------------------------------------------------------
 @app.route("/upload", methods=["POST"])
-def upload():
-    try:
-        keep = request.form.get("keep") == "true"
-        files = request.files.getlist("files")
-        if not files:
-            return jsonify({"error": "No files uploaded"}), 400
+def upload_files():
+    """Upload and embed files into short-term memory."""
+    global memory_vectors, memory_texts
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "No files uploaded."}), 400
 
-        uploaded_files = []
+    count = 0
+    for f in files:
+        text = extract_text(f)
+        if text.strip():
+            emb = embed_text(text)
+            memory_vectors.append(emb)
+            memory_texts.append(text[:2000])  # keep a snippet
+            count += 1
 
-        for f in files:
-            text = extract_text(f)
-            chunks, vectors = make_embeddings([text])
-            timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    return jsonify({"message": f"✅ Uploaded {count} file(s) to short-term memory."})
 
-            meta = {
-                "name": f.filename,
-                "timestamp": timestamp,
-                "count": len(chunks)
-            }
-
-            if keep:
-                master_index.add(vectors)
-                master_chunks.extend(chunks)
-                master_files.append(meta)
-            else:
-                temp_index.add(vectors)
-                temp_chunks.extend(chunks)
-                temp_files.append(meta)
-
-            uploaded_files.append(meta)
-
-        return jsonify({
-            "message": "📚 Added to long-term memory." if keep else "🧠 Added to short-term memory.",
-            "files": uploaded_files
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @app.route("/ask", methods=["POST"])
-def ask():
+def ask_question():
+    """Answer questions based on short-term memory context."""
+    global memory_vectors, memory_texts
+    data = request.get_json()
+    question = data.get("question", "").strip()
+    if not question:
+        return jsonify({"error": "No question provided."}), 400
+
+    if not memory_vectors:
+        return jsonify({"answer": "Memory is empty. Please upload files first."})
+
+    # ---- find relevant context ----
+    q_emb = embed_text(question)
+    index = faiss.IndexFlatL2(len(q_emb))
+    index.add(np.stack(memory_vectors))
+    _, I = index.search(np.array([q_emb]), k=min(3, len(memory_vectors)))
+
+    context = "\n\n".join([memory_texts[i] for i in I[0]])
+
+    # ---- professional assistant prompt ----
+    prompt = f"""
+You are an AI assistant helping users analyze their uploaded documents.
+Base your answer strictly on the context below, without adding outside information or assumptions.
+
+Context:
+{context}
+
+User Question:
+{question}
+
+Provide a clear, concise, and professional answer that directly addresses the question.
+If the context does not contain the answer, say so honestly.
+"""
+
     try:
-        data = request.get_json(force=True)
-        question = data.get("question", "").strip()
-        if not question:
-            return jsonify({"error": "Missing question"}), 400
-
-        embed_resp = client.embeddings.create(model="text-embedding-3-small", input=[question])
-        q_vec = np.array([embed_resp.data[0].embedding]).astype("float32")
-
-        def top_context(index, chunks):
-            if index.ntotal == 0:
-                return []
-            D, I = index.search(q_vec, k=min(3, index.ntotal))
-            return [chunks[i] for i in I[0] if i < len(chunks)]
-
-        ctx = "\n".join(top_context(temp_index, temp_chunks) + top_context(master_index, master_chunks))
-        if not ctx.strip():
-            return jsonify({"answer": "No relevant context found. Try uploading files first."})
-
-        answer = ask_gpt(question, ctx)
-        return jsonify({"answer": answer})
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a precise, factual, and professional assistant.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+        )
+        answer = completion.choices[0].message.content
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        answer = f"⚠️ Error: {e}"
+
+    return jsonify({"answer": answer})
+
 
 @app.route("/reset", methods=["POST"])
 def reset_memory():
-    global temp_index, temp_chunks, temp_files
-    temp_index = faiss.IndexFlatL2(1536)
-    temp_chunks = []
-    temp_files = []
+    """Clear short-term memory."""
+    global memory_vectors, memory_texts
+    memory_vectors.clear()
+    memory_texts.clear()
     return jsonify({"message": "♻️ Short-term memory cleared."})
 
-@app.route("/reset_longterm", methods=["POST"])
-def reset_longterm():
-    global master_index, master_chunks, master_files
-    master_index = faiss.IndexFlatL2(1536)
-    master_chunks = []
-    master_files = []
-    return jsonify({"message": "🧹 Long-term memory fully cleared."})
 
-@app.route("/list_longterm", methods=["GET"])
-def list_longterm():
-    if not master_files:
-        return jsonify({"files": [], "message": "No long-term files found."})
-
-    result = []
-    for meta in master_files:
-        preview_text = next((chunk for chunk in master_chunks if chunk.strip()), "")[:150]
-        result.append({
-            "file": meta["name"],
-            "uploaded": meta["timestamp"],
-            "chunks": meta["count"],
-            "preview": preview_text + "..." if len(preview_text) > 120 else preview_text
-        })
-
-    return jsonify({"count": len(result), "files": result})
-
-# ---------- MAIN ----------
+# -------------------------------------------------------------------
+# ✅ MAIN
+# -------------------------------------------------------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=5000)
