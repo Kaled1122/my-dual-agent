@@ -30,7 +30,8 @@
       margin-top: 18px;
     }
     input[type=file],
-    textarea {
+    textarea,
+    select {
       width: 100%;
       margin-top: 8px;
       padding: 12px;
@@ -98,11 +99,12 @@
 
     <ul class="supported">
       <strong>Supported File Types:</strong>
-      <li><b>PDF (.pdf)</b> — Text-based documents (not scanned images)</li>
-      <li><b>Word (.docx)</b> — Extracts all paragraph text</li>
+      <li><b>PDF (.pdf)</b> — Text-based documents</li>
+      <li><b>Word (.docx)</b> — Extracts paragraph text</li>
       <li><b>Excel / CSV (.xls, .xlsx, .csv)</b> — Reads spreadsheet data</li>
-      <li><b>PowerPoint (.pptx)</b> — Captures text from slides</li>
-      <li><b>Text (.txt, .md, .json, .log)</b> — Any plain-text files</li>
+      <li><b>PowerPoint (.pptx)</b> — Captures slide text</li>
+      <li><b>HTML (.html, .htm)</b> — Extracts visible page text</li>
+      <li><b>Text (.txt, .md, .json, .log)</b> — Plain text files</li>
     </ul>
 
     <hr>
@@ -110,6 +112,15 @@
     <!-- ❓ ASK -->
     <label>Ask a Question</label>
     <textarea id="question" placeholder="Type your question..." rows="3"></textarea>
+
+    <!-- 🧠 ANSWER LENGTH MODE -->
+    <label>Answer Length</label>
+    <select id="lengthMode">
+      <option value="concise">Concise (short)</option>
+      <option value="balanced" selected>Balanced (medium)</option>
+      <option value="detailed">Detailed (long)</option>
+    </select>
+
     <button onclick="askQuestion()">Ask</button>
     <div id="answer" class="answer"></div>
 
@@ -119,11 +130,9 @@
   </div>
 
   <script>
-    const API_URL = "https://my-dual-agent.onrender.com"; // replace with your Render backend URL
+    const API_URL = "https://my-dual-agent.onrender.com"; // ← change to your Render backend
 
-    // --------------------------------------------------------------------
     // 🌐 FETCH MULTIPLE URLS
-    // --------------------------------------------------------------------
     async function fetchUrls() {
       const raw = document.getElementById("urlInput").value.trim();
       if (!raw) return alert("Please paste at least one URL.");
@@ -150,9 +159,7 @@
       document.getElementById("urlStatus").innerText = results.join("\n");
     }
 
-    // --------------------------------------------------------------------
     // 📁 FILE UPLOAD
-    // --------------------------------------------------------------------
     async function uploadFiles() {
       const files = document.getElementById("fileInput").files;
       if (!files.length) return alert("No files selected.");
@@ -170,11 +177,10 @@
       }
     }
 
-    // --------------------------------------------------------------------
     // ❓ ASK QUESTION
-    // --------------------------------------------------------------------
     async function askQuestion() {
       const q = document.getElementById("question").value.trim();
+      const length = document.getElementById("lengthMode").value;
       if (!q) return alert("Enter a question first.");
 
       document.getElementById("answer").innerText = "Thinking...";
@@ -182,18 +188,17 @@
         const res = await fetch(`${API_URL}/ask`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: q })
+          body: JSON.stringify({ question: q, length })
         });
         const data = await res.json();
-        document.getElementById("answer").innerText = data.answer || data.error;
+        const model = data.model_used ? `\n\n(Model: ${data.model_used}, Mode: ${data.mode})` : "";
+        document.getElementById("answer").innerText = (data.answer || data.error) + model;
       } catch (err) {
         document.getElementById("answer").innerText = "Error: " + err.message;
       }
     }
 
-    // --------------------------------------------------------------------
     // ♻️ RESET MEMORY
-    // --------------------------------------------------------------------
     async function resetMemory() {
       try {
         const res = await fetch(`${API_URL}/reset`, { method: "POST" });
